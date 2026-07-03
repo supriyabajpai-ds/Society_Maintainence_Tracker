@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My complaints — Nivaas</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="leaf-dot"></span> Nivaas <small>Resident</small></div>
+    <div>
+      <span class="who" id="who"></span>
+      <button class="btn ghost" onclick="API.logout()">Log out</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="grid-2">
+      <div>
+        <section class="card" id="raise-card">
+          <h2>Raise a complaint</h2>
+          <p class="section-note">Describe the issue and attach a photo if it helps the team locate it.</p>
+          <form id="complaint-form">
+            <div class="form-row">
+              <div>
+                <label for="c-category">Category</label>
+                <select id="c-category" required></select>
+              </div>
+              <div>
+                <label for="c-title">Short title</label>
+                <input id="c-title" placeholder="e.g. Water leak in bathroom" required minlength="3" maxlength="150" />
+              </div>
+            </div>
+            <label for="c-desc">Description</label>
+            <textarea id="c-desc" required minlength="5" placeholder="What's wrong, where exactly, and since when?"></textarea>
+            <label for="c-photo">Photo <span style="font-weight:400;color:var(--muted)">(optional, JPG/PNG/WEBP up to 5 MB)</span></label>
+            <input id="c-photo" type="file" accept=".jpg,.jpeg,.png,.webp" />
+            <div style="margin-top:16px"><button class="btn" id="submit-btn">Submit complaint</button></div>
+            <div class="msg" id="form-msg"></div>
+          </form>
+        </section>
+
+        <section style="margin-top:24px">
+          <h2 style="color:var(--forest); margin-bottom:12px">My complaints</h2>
+          <div id="complaints"><div class="empty">Loading…</div></div>
+        </section>
+      </div>
+
+      <aside>
+        <section class="card">
+          <h2>Notice board</h2>
+          <div id="notices"><div class="empty">Loading…</div></div>
+        </section>
+      </aside>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/resident.js"></script>
+</body>
+</html>

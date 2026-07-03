@@ -1,0 +1,223 @@
+const user = requireRole('admin');
+if (user) document.getElementById('who').textContent = user.name;
+
+let META = { categories: [], statuses: [], priorities: [] };
+let modalComplaintId = null;
+
+async function loadMeta() {
+  META = await API.request('/api/complaints/categories');
+  document.getElementById('f-category').innerHTML =
+    '<option value="">All</option>' + META.categories.map(c => `<option>${c}</option>`).join('');
+  document.getElementById('f-status').innerHTML =
+    '<option value="">All</option>' + META.statuses.map(s => `<option>${s}</option>`).join('');
+}
+
+async function loadDashboard() {
+  const d = await API.request('/api/dashboard');
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="num">${d.total}</div><div class="lbl">Total complaints</div></div>
+    <div class="stat"><div class="num">${d.by_status['Open'] || 0}</div><div class="lbl">Open</div></div>
+    <div class="stat"><div class="num">${d.by_status['In Progress'] || 0}</div><div class="lbl">In progress</div></div>
+    <div class="stat"><div class="num">${d.by_status['Resolved'] || 0}</div><div class="lbl">Resolved</div></div>
+    <div class="stat alert"><div class="num">${d.overdue_count}</div><div class="lbl">Overdue (&gt;${d.overdue_threshold_days}d)</div></div>`;
+
+  const entries = Object.entries(d.by_category).sort((a, b) => b[1] - a[1]);
+  const max = Math.max(1, ...entries.map(e => e[1]));
+  document.getElementById('cat-bars').innerHTML = entries.length
+    ? entries.map(([cat, n]) => `
+        <div class="cat-bar">
+          <span>${esc(cat)}</span>
+          <div class="bar"><span style="width:${(n / max) * 100}%"></span></div>
+          <strong>${n}</strong>
+        </div>`).join('')
+    : '<div class="empty">No complaints yet.</div>';
+
+  document.getElementById('overdue-days').value = d.overdue_threshold_days;
+}
+
+function adminComplaintCard(c) {
+  const closed = c.status === 'Resolved';
+  const overdue = c.is_overdue ? `<span class="pill overdue">Overdue</span>` : '';
+  const photo = c.photo_url
+    ? `<div class="complaint-photo"><a href="${c.photo_url}" target="_blank" rel="noopener"><img src="${c.photo_url}" alt="Complaint photo" /></a></div>` : '';
+  const history = c.history.map(h => `
+    <div class="history-item">
+      <span class="h-status">${esc(h.status)}</span>
+      <span class="h-when"> · ${fmtDate(h.created_at)} · by ${esc(h.actor_name)}</span>
+      ${h.note ? `<div class="h-note">${esc(h.note)}</div>` : ''}
+    </div>`).join('');
+
+  const prioSelect = `
+    <select onchange="setPriority(${c.id}, this.value)" ${closed ? 'disabled' : ''} aria-label="Priority">
+      ${META.priorities.map(p => `<option ${p === c.priority ? 'selected' : ''}>${p}</option>`).join('')}
+    </select>`;
+
+  const overdueBtn = closed ? '' : `
+    <button class="btn small ${c.is_overdue ? 'secondary' : 'warn'}"
+      onclick="toggleOverdue(${c.id}, ${!c.is_overdue})">
+      ${c.is_overdue ? 'Clear overdue flag' : 'Flag overdue'}
+    </button>`;
+
+  return `
+    <article class="complaint ${c.is_overdue ? 'is-overdue' : ''}">
+      <div class="complaint-head">
+        <div>
+          <h3>#${c.id} · ${esc(c.title)}</h3>
+          <div class="complaint-meta">
+            ${esc(c.category)} · ${esc(c.resident_name)} (Flat ${esc(c.resident_flat)})
+            · raised ${fmtDate(c.created_at)} · ${c.days_open} day(s) open
+          </div>
+        </div>
+        <div class="pill-row">
+          ${overdue}
+          <span class="pill prio-${c.priority}">${c.priority}</span>
+          <span class="pill ${statusClass(c.status)}">${c.status}</span>
+        </div>
+      </div>
+      <p class="complaint-desc">${esc(c.description)}</p>
+      ${photo}
+      <div class="admin-actions">
+        ${prioSelect}
+        ${closed ? '<span class="pill Resolved">Closed</span>'
+                 : `<button class="btn small" onclick="openModal(${c.id}, '${statusClass(c.status)}')">Update status</button>`}
+        ${overdueBtn}
+      </div>
+      <button class="toggle-history" onclick="this.nextElementSibling.classList.toggle('open');
+        this.textContent = this.nextElementSibling.classList.contains('open') ? 'Hide status history' : 'View status history';">
+        View status history</button>
+      <div class="history">${history}</div>
+    </article>`;
+}
+
+async function loadComplaints() {
+  const box = document.getElementById('complaints');
+  const params = new URLSearchParams();
+  const cat = document.getElementById('f-category').value;
+  const st = document.getElementById('f-status').value;
+  const from = document.getElementById('f-from').value;
+  const to = document.getElementById('f-to').value;
+  if (cat) params.set('category', cat);
+  if (st) params.set('status', st);
+  if (from) params.set('date_from', from);
+  if (to) params.set('date_to', to);
+
+  const items = await API.request('/api/complaints?' + params.toString());
+  box.innerHTML = items.length
+    ? items.map(adminComplaintCard).join('')
+    : '<div class="empty">No complaints match these filters.</div>';
+}
+
+function clearFilters() {
+  ['f-category', 'f-status', 'f-from', 'f-to'].forEach(id => document.getElementById(id).value = '');
+  loadComplaints();
+}
+
+['f-category', 'f-status', 'f-from', 'f-to'].forEach(id =>
+  document.getElementById(id).addEventListener('change', loadComplaints));
+
+async function setPriority(id, priority) {
+  try {
+    await API.request(`/api/complaints/${id}/priority`, { method: 'PATCH', body: { priority } });
+    refresh();
+  } catch (err) { alert(err.message); }
+}
+
+async function toggleOverdue(id, flagged) {
+  try {
+    await API.request(`/api/complaints/${id}/overdue`, { method: 'PATCH', body: { flagged } });
+    refresh();
+  } catch (err) { alert(err.message); }
+}
+
+/* ----- Status modal ----- */
+function openModal(id, currentStatusClass) {
+  modalComplaintId = id;
+  const current = currentStatusClass === 'InProgress' ? 'In Progress' : currentStatusClass;
+  const next = META.statuses.filter(s => s !== current && s !== 'Open');
+  document.getElementById('m-status').innerHTML = next.map(s => `<option>${s}</option>`).join('');
+  document.getElementById('m-note').value = '';
+  document.getElementById('modal-sub').textContent =
+    `Complaint #${id} — the resident will be emailed about this change.`;
+  document.getElementById('modal-msg').className = 'msg';
+  document.getElementById('status-modal').classList.add('open');
+}
+
+function closeModal() { document.getElementById('status-modal').classList.remove('open'); }
+
+async function submitStatus() {
+  const msg = document.getElementById('modal-msg');
+  msg.className = 'msg';
+  try {
+    await API.request(`/api/complaints/${modalComplaintId}/status`, {
+      method: 'POST',
+      body: {
+        status: document.getElementById('m-status').value,
+        note: document.getElementById('m-note').value || null,
+      },
+    });
+    closeModal();
+    refresh();
+  } catch (err) { msg.className = 'msg error'; msg.textContent = err.message; }
+}
+
+document.getElementById('status-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'status-modal') closeModal();
+});
+
+/* ----- Notices ----- */
+async function loadNotices() {
+  const box = document.getElementById('notices');
+  const items = await API.request('/api/notices');
+  box.innerHTML = items.length
+    ? items.map(n => `
+        <article class="notice ${n.is_important ? 'important' : ''}">
+          <h3>${n.is_important ? '<span class="pill pinned">Pinned</span>' : ''} ${esc(n.title)}</h3>
+          <p>${esc(n.body)}</p>
+          <div class="when">Posted ${fmtDate(n.created_at)}</div>
+        </article>`).join('')
+    : '<div class="empty">No notices posted yet.</div>';
+}
+
+document.getElementById('notice-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('notice-msg');
+  msg.className = 'msg';
+  try {
+    const important = document.getElementById('n-important').checked;
+    await API.request('/api/notices', {
+      method: 'POST',
+      body: {
+        title: document.getElementById('n-title').value,
+        body: document.getElementById('n-body').value,
+        is_important: important,
+      },
+    });
+    msg.className = 'msg ok';
+    msg.textContent = important
+      ? 'Notice posted, pinned, and emailed to all residents.'
+      : 'Notice posted.';
+    e.target.reset();
+    loadNotices();
+  } catch (err) { msg.className = 'msg error'; msg.textContent = err.message; }
+});
+
+/* ----- Settings ----- */
+async function saveOverdueDays() {
+  const msg = document.getElementById('overdue-msg');
+  msg.className = 'msg';
+  try {
+    const days = parseInt(document.getElementById('overdue-days').value, 10);
+    await API.request('/api/settings/overdue-days', { method: 'PUT', body: { days } });
+    msg.className = 'msg ok';
+    msg.textContent = `Saved. Complaints open longer than ${days} days are now overdue.`;
+    refresh();
+  } catch (err) { msg.className = 'msg error'; msg.textContent = err.message; }
+}
+
+function refresh() { loadDashboard(); loadComplaints(); }
+
+(async () => {
+  await loadMeta();
+  refresh();
+  loadNotices();
+})();

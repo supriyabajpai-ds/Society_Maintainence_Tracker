@@ -1,0 +1,94 @@
+const user = requireRole('resident');
+if (user) document.getElementById('who').textContent = `${user.name} · Flat ${user.flat_no}`;
+
+async function loadCategories() {
+  const data = await API.request('/api/complaints/categories');
+  const sel = document.getElementById('c-category');
+  sel.innerHTML = data.categories.map(c => `<option>${c}</option>`).join('');
+}
+
+function complaintCard(c) {
+  const overdue = c.is_overdue ? `<span class="pill overdue">Overdue</span>` : '';
+  const photo = c.photo_url
+    ? `<div class="complaint-photo"><a href="${c.photo_url}" target="_blank" rel="noopener"><img src="${c.photo_url}" alt="Complaint photo" /></a></div>`
+    : '';
+  const history = c.history.map(h => `
+    <div class="history-item">
+      <span class="h-status">${esc(h.status)}</span>
+      <span class="h-when"> · ${fmtDate(h.created_at)} · by ${esc(h.actor_name)}</span>
+      ${h.note ? `<div class="h-note">${esc(h.note)}</div>` : ''}
+    </div>`).join('');
+
+  return `
+    <article class="complaint ${c.is_overdue ? 'is-overdue' : ''}">
+      <div class="complaint-head">
+        <div>
+          <h3>${esc(c.title)}</h3>
+          <div class="complaint-meta">${esc(c.category)} · raised ${fmtDate(c.created_at)} · ${c.days_open} day(s) open</div>
+        </div>
+        <div class="pill-row">
+          ${overdue}
+          <span class="pill prio-${c.priority}">${c.priority} priority</span>
+          <span class="pill ${statusClass(c.status)}">${c.status}</span>
+        </div>
+      </div>
+      <p class="complaint-desc">${esc(c.description)}</p>
+      ${photo}
+      <button class="toggle-history" onclick="this.nextElementSibling.classList.toggle('open');
+        this.textContent = this.nextElementSibling.classList.contains('open') ? 'Hide status history' : 'View status history';">
+        View status history</button>
+      <div class="history">${history}</div>
+    </article>`;
+}
+
+async function loadComplaints() {
+  const box = document.getElementById('complaints');
+  const items = await API.request('/api/complaints/mine');
+  box.innerHTML = items.length
+    ? items.map(complaintCard).join('')
+    : `<div class="empty">No complaints yet. Raise one above when something needs fixing.</div>`;
+}
+
+async function loadNotices() {
+  const box = document.getElementById('notices');
+  const items = await API.request('/api/notices');
+  box.innerHTML = items.length
+    ? items.map(n => `
+        <article class="notice ${n.is_important ? 'important' : ''}">
+          <h3>${n.is_important ? '<span class="pill pinned">Pinned</span>' : ''} ${esc(n.title)}</h3>
+          <p>${esc(n.body)}</p>
+          <div class="when">Posted ${fmtDate(n.created_at)} by ${esc(n.author_name)}</div>
+        </article>`).join('')
+    : `<div class="empty">No notices posted yet.</div>`;
+}
+
+document.getElementById('complaint-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('form-msg');
+  const btn = document.getElementById('submit-btn');
+  msg.className = 'msg';
+  btn.disabled = true;
+  try {
+    const fd = new FormData();
+    fd.append('category', document.getElementById('c-category').value);
+    fd.append('title', document.getElementById('c-title').value);
+    fd.append('description', document.getElementById('c-desc').value);
+    const photo = document.getElementById('c-photo').files[0];
+    if (photo) fd.append('photo', photo);
+
+    await API.request('/api/complaints', { method: 'POST', body: fd, isForm: true });
+    msg.className = 'msg ok';
+    msg.textContent = 'Complaint submitted. You will get an email whenever its status changes.';
+    e.target.reset();
+    loadComplaints();
+  } catch (err) {
+    msg.className = 'msg error';
+    msg.textContent = err.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+loadCategories();
+loadComplaints();
+loadNotices();
