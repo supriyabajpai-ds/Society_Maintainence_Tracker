@@ -1,18 +1,19 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional, List
 
 from pydantic import BaseModel, EmailStr, Field
 
+
 # ---------- Auth ----------
 
-class RegisterIn(BaseModel):
-    name: str = Field(min_length=2, max_length=120)
-    flat_no: str = Field(min_length=1, max_length=30)
+class RegisterRequest(BaseModel):
+    name: str
+    flat_no: str
     email: EmailStr
-    password: str = Field(min_length=6, max_length=128)
+    password: str = Field(min_length=6)
 
 
-class LoginIn(BaseModel):
+class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
@@ -28,19 +29,21 @@ class UserOut(BaseModel):
         from_attributes = True
 
 
-class TokenOut(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
+class TokenResponse(BaseModel):
+    token: str
     user: UserOut
 
 
 # ---------- Complaints ----------
 
-class HistoryOut(BaseModel):
+class HistoryItemOut(BaseModel):
     status: str
-    note: Optional[str]
+    note: Optional[str] = None
     actor_name: str
     created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class ComplaintOut(BaseModel):
@@ -48,36 +51,42 @@ class ComplaintOut(BaseModel):
     category: str
     title: str
     description: str
-    photo_url: Optional[str]
+    photo_url: Optional[str] = None
     priority: str
     status: str
     is_overdue: bool
     days_open: int
     created_at: datetime
-    resolved_at: Optional[datetime]
+    resolved_at: Optional[datetime] = None
     resident_name: str
     resident_flat: str
-    history: List[HistoryOut]
+    history: List[HistoryItemOut] = []
 
 
-class StatusUpdateIn(BaseModel):
-    status: str  # "In Progress" | "Resolved"
-    note: Optional[str] = Field(default=None, max_length=500)
+class CategoriesOut(BaseModel):
+    categories: List[str]
+    statuses: List[str]
+    priorities: List[str]
 
 
-class PriorityUpdateIn(BaseModel):
-    priority: str  # Low | Medium | High
+class StatusUpdateRequest(BaseModel):
+    status: str
+    note: Optional[str] = None
 
 
-class OverdueFlagIn(BaseModel):
+class PriorityUpdateRequest(BaseModel):
+    priority: str
+
+
+class OverdueUpdateRequest(BaseModel):
     flagged: bool
 
 
 # ---------- Notices ----------
 
-class NoticeIn(BaseModel):
-    title: str = Field(min_length=3, max_length=150)
-    body: str = Field(min_length=3)
+class NoticeCreate(BaseModel):
+    title: str
+    body: str
     is_important: bool = False
 
 
@@ -86,11 +95,14 @@ class NoticeOut(BaseModel):
     title: str
     body: str
     is_important: bool
-    author_name: str
     created_at: datetime
+    author_name: str
+
+    class Config:
+        from_attributes = True
 
 
-# ---------- Dashboard / Settings ----------
+# ---------- Dashboard & settings ----------
 
 class DashboardOut(BaseModel):
     total: int
@@ -100,5 +112,5 @@ class DashboardOut(BaseModel):
     overdue_threshold_days: int
 
 
-class OverdueThresholdIn(BaseModel):
+class OverdueDaysUpdate(BaseModel):
     days: int = Field(ge=1, le=90)
