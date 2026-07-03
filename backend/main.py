@@ -1,62 +1,75 @@
-"""Email notifications.
-
-Works with any free SMTP service (Brevo, Gmail app password, Mailtrap...).
-If SMTP is not configured via env vars, emails are printed to the console
-so the app remains fully testable in development.
-"""
+"""App entry point: creates the FastAPI app, wires up routers,
+mounts static files/uploads, and seeds the admin account on startup."""
 
 import os
-import smtplib
-from email.mime.text import MIMEText
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
+from backend.database import Base, engine, SessionLocal
+from backend import models
+from backend.auth import hash_password
+from backend.routers import (
+    auth_router,
+    complaints_router,
+    notices_router,
+    dashboard_router,
+)
+
+app = FastAPI(title="Nivaas — Society Maintenance Tracker")
+
+# Allow the frontend (served separately or from this same origin) to call the API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Create tables if they don't exist yet
+Base.metadata.create_all(bind=engine)
 
 
-def _smtp_configured() -> bool:
-    return bool(os.getenv("SMTP_HOST"))
+@app.on_event("startup")
+def seed_admin() -> None:
+    """Create the default admin account on first start, if it doesn't exist."""
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@nivaas-society.com")
+    admin_password = os.getenv("ADMIN_PASSWORD", "admin123")
 
-
-def send_email(to: str, subject: str, body: str) -> None:
-    if not _smtp_configured():
-        print(f"\n[EMAIL - console fallback]\nTo: {to}\nSubject: {subject}\n{body}\n")
-        return
-
-    host = os.getenv("SMTP_HOST")
-    port = int(os.getenv("SMTP_PORT", "587"))
-    username = os.getenv("SMTP_USER")
-    password = os.getenv("SMTP_PASS")
-    sender = os.getenv("SMTP_FROM", username)
-
-    msg = MIMEText(body, "plain")
-    msg["Subject"] = subject
-    msg["From"] = sender
-    msg["To"] = to
-
+    db = SessionLocal()
     try:
-        with smtplib.SMTP(host, port, timeout=15) as server:
-            server.starttls()
-            if username and password:
-                server.login(username, password)
-            server.sendmail(sender, [to], msg.as_string())
-    except Exception as exc:  # never let email failures break the API
-        print(f"[EMAIL ERROR] {exc}")
+        existing = db.query(models.User).filter(models.User.email == admin_email).first()
+        if not existing:
+            admin = models.User(
+                name="Admin",
+                flat_no="—",
+                email=admin_email,
+                password_hash=hash_password(admin_password),
+                role="admin",
+            )
+            db.add(admin)
+            db.commit()
+    finally:
+        db.close()
 
 
-def notify_status_change(to: str, resident_name: str, complaint_title: str,
-                         new_status: str, note: str | None) -> None:
-    body = (
-        f"Hi {resident_name},\n\n"
-        f"Your complaint \"{complaint_title}\" has been updated.\n"
-        f"New status: {new_status}\n"
-    )
-    if note:
-        body += f"Note from admin: {note}\n"
-    body += "\nYou can view the full history by logging in to Nivaas.\n\n— Nivaas Society Desk"
-    send_email(to, f"Complaint update: {new_status} — {complaint_title}", body)
+# API routers
+app.include_router(auth_router.router, prefix="/api/auth", tags=["auth"])
+app.include_router(complaints_router.router, prefix="/api/complaints", tags=["complaints"])
+app.include_router(notices_router.router, prefix="/api/notices", tags=["notices"])
+app.include_router(dashboard_router.router, prefix="/api", tags=["dashboard"])
 
 
-def notify_important_notice(to: str, resident_name: str, title: str, notice_body: str) -> None:
-    body = (
-        f"Hi {resident_name},\n\n"
-        f"An important notice has been posted on the society notice board:\n\n"
-        f"{title}\n{'-' * len(title)}\n{notice_body}\n\n— Nivaas Society Desk"
-    )
-    send_email(to, f"Important notice: {title}", body)
+@app.get("/api/health")
+def health_check():
+    return {"status": "ok"}
+
+
+# Serve uploaded complaint photos
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+# Serve the frontend (index.html, resident.html, admin.html, css/, js/) at the root
+app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
